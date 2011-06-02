@@ -88,7 +88,7 @@ namespace SimpleMock
             
             var il = methodBuilder.GetILGenerator();
 
-            var methods = _methodParameterMocks.Where(
+            var methodsMocks = _methodParameterMocks.Where(
                 m =>
                     {
                         var method = ((MethodCallExpression) ((LambdaExpression) m.MethodExpression).Body).Method;
@@ -111,10 +111,9 @@ namespace SimpleMock
                         return matches;
                     });
             
-            if (methods.Any())
+            if (methodsMocks.Any())
             {
-                CreateMethodBranch(il, methods);
-                EmitDefault(il, methodInfo);
+                EmitMethodBranch(il, methodInfo, methodsMocks);
                 il.Emit(OpCodes.Ret);
             }
             else
@@ -122,23 +121,20 @@ namespace SimpleMock
                 il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
                 il.Emit(OpCodes.Throw);
             }
-
+            
             typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
         }
         /// <summary>
         /// TODO: Parse the expression tree, and convert it to IL manually
         /// </summary>
         /// <param name="il"></param>
+        /// <param name="methodInfo"></param>
         /// <param name="methodParameterMocks"></param>
-        private void CreateMethodBranch(ILGenerator il, IEnumerable<Mock<T>.IMethodParameterMock> methodParameterMocks)
+        private void EmitMethodBranch(ILGenerator il, MethodInfo methodInfo, IEnumerable<Mock<T>.IMethodParameterMock> methodParameterMocks)
         {
             foreach (var methodParameterMock in methodParameterMocks)
             {
-                var method = (MethodCallExpression)((LambdaExpression)methodParameterMock.MethodExpression).Body;
-                foreach (Expression argumentExpression in method.Arguments)
-                {
-                    Console.WriteLine(argumentExpression);
-                }
+                EmitBranch(il, methodInfo, methodParameterMock);
             }
         }
         private void EmitDefault(ILGenerator il, MethodInfo methodInfo)
@@ -162,13 +158,75 @@ namespace SimpleMock
                 il.Emit(OpCodes.Ldnull);
             }
         }
-        private void EmitBranch(ILGenerator il, Expression argumentExpression)
+        private void EmitBranch(ILGenerator il, MethodInfo methodInfo, Mock<T>.IMethodParameterMock methodParameterMock)
         {
-            if (argumentExpression is ConstantExpression)
+            var references = new List<object>();
+
+            var method = (MethodCallExpression)((LambdaExpression)methodParameterMock.MethodExpression).Body;
+
+            var pairs = from parameter in methodInfo.GetParameters()
+                        from argument in method.Arguments
+                        select new
+                                   {
+                                       Parameter = parameter,
+                                       Expression = (ConstantExpression)argument
+                                   };
+
+            var exitLabel = il.DefineLabel();
+            
+            int index = 1;
+            foreach (var pair in pairs)
             {
-                var constant = (ConstantExpression) argumentExpression;
-                Console.WriteLine(constant);
-                //constant.
+                var argumentExpression = pair.Expression;
+
+                if (argumentExpression.Type.IsClass)
+                {
+                    var defaultMethod = typeof (EqualityComparer<>).MakeGenericType(new[] {argumentExpression.Type}).GetMethod("get_Default");
+                    il.Emit(OpCodes.Call, defaultMethod);
+                    il.Emit(OpCodes.Ldarg, index);
+                    LoadConstant(references, il, argumentExpression.Value, argumentExpression.Value.GetType());
+                    var equalsMethod = defaultMethod.ReturnType.GetMethods(BindingFlags.Instance | BindingFlags.Public).First(m => m.Name == "Equals" && m.GetParameters().Count() == 2);
+                    il.Emit(OpCodes.Callvirt, equalsMethod);
+                    il.Emit(OpCodes.Brfalse_S, exitLabel);
+                }
+
+                index++;
+            }
+
+            if (methodParameterMock.MethodReturnsMock is Mock<T>.IMethodReturnsMock)
+            {
+                object returnValue = ((Mock<T>.IMethodReturnsMock)methodParameterMock.MethodReturnsMock).ReturnValue;
+                LoadConstant(references, il, returnValue, returnValue.GetType());
+                il.Emit(OpCodes.Ret);
+            }
+            else if (methodParameterMock.MethodReturnsMock is Mock<T>.IMethodThrowsMock)
+            {
+                Type exceptionType = ((Mock<T>.IMethodThrowsMock)methodParameterMock.MethodReturnsMock).ExceptionType;
+                il.Emit(OpCodes.Newobj, exceptionType.GetConstructor(Type.EmptyTypes));
+                il.Emit(OpCodes.Throw);
+            }
+            il.MarkLabel(exitLabel);
+        }
+        private void LoadConstant(List<object> references, ILGenerator il, object constantValue, Type constantType)
+        {
+            int index = references.IndexOf(constantValue);
+
+            if (index < 0)
+            {
+                index = references.Count;
+                references.Add(constantValue);
+            }
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldc_I4_4, index);
+            il.Emit(OpCodes.Ldelem_Ref);
+            if (constantType.IsValueType)
+            {
+                il.Emit(OpCodes.Unbox_Any, constantType);
+            }
+            else
+            {
+                il.Emit(OpCodes.Castclass, constantType);
             }
         }
     }

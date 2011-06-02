@@ -43,12 +43,12 @@ namespace SimpleMock
         public interface IMethodParameterMock
         {
             Expression MethodExpression { get; }
-            IMethodReturnsMock MethodReturnsMock { get; }
+            IMethodCompletesMock MethodReturnsMock { get; }
         }
         public class MethodParameterMock<TReturn> : IMethodParameterMock, IInvisibleSystemObjectMethods
         {
             public Expression MethodExpression { get; private set; }
-            public IMethodReturnsMock MethodReturnsMock { get; private set; }
+            public IMethodCompletesMock MethodReturnsMock { get; private set; }
 
             public MethodParameterMock(Expression<Func<T, TReturn>> methodExpression)
             {
@@ -63,22 +63,31 @@ namespace SimpleMock
             }
 
             public MethodThrowsMock<TException> Throws<TException>()
+                where TException : Exception
             {
                 var methodThrowsMock = new MethodThrowsMock<TException>();
                 MethodReturnsMock = methodThrowsMock;
                 return methodThrowsMock;
             }
             public MethodThrowsMock<TException> Throws<TException>(Func<TException> exceptionInitializer)
+                where TException : Exception
             {
                 var methodThrowsMock = new MethodThrowsMock<TException>(exceptionInitializer);
                 MethodReturnsMock = methodThrowsMock;
                 return methodThrowsMock;
             }
         }
-        public interface IMethodReturnsMock { }
+        public interface IMethodCompletesMock
+        {
+            Action Callback { get; }
+        }
+        public interface IMethodReturnsMock : IMethodCompletesMock
+        {
+            object ReturnValue { get; }
+        }
         public class MethodReturnsMock<TReturn> : IMethodReturnsMock, IInvisibleSystemObjectMethods
         {
-            public TReturn ReturnValue { get; private set; }
+            public object ReturnValue { get; private set; }
             public Action Callback { get; private set; }
 
             public MethodReturnsMock(TReturn returnValue)
@@ -91,16 +100,26 @@ namespace SimpleMock
                 Callback = callback;
             }
         }
-        public class MethodThrowsMock<TException> : IMethodReturnsMock, IInvisibleSystemObjectMethods
+        public interface IMethodThrowsMock : IMethodCompletesMock
         {
-            public Func<TException> ExceptionInitializer { get; private set; }
+            Type ExceptionType { get; }
+            Func<Exception> ExceptionInitializer { get; }
+        }
+        public class MethodThrowsMock<TException> : IMethodThrowsMock, IInvisibleSystemObjectMethods
+            where TException : Exception
+        {
+            public Type ExceptionType { get; private set; }
+            public Func<Exception> ExceptionInitializer { get; private set; }
+            public Action Callback { get; private set; }
 
             public MethodThrowsMock()
             {
+                ExceptionType = typeof (TException);
             }
             public MethodThrowsMock(Func<TException> exceptionInitializer)
             {
-                ExceptionInitializer = exceptionInitializer;
+                ExceptionType = typeof(TException);
+                ExceptionInitializer = () => exceptionInitializer();
             }
         }
 

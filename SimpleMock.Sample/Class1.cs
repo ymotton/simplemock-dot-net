@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Threading;
 
 namespace SimpleMock.Sample
@@ -6,15 +7,17 @@ namespace SimpleMock.Sample
 
     public class Class1
     {
-        public string Bar(bool foo)
+        public Class1 _foo;
+
+        public Class1 Bar(Class1 foo)
         {
-            if (foo == true)
+            if (EqualityComparer<Class1>.Default.Equals(foo, new Class1()))
             {
-                return "true";
+                return new Class1();
             }
-            else if (foo == false)
+            else if (EqualityComparer<Class1>.Default.Equals(foo, new Class1()))
             {
-                return "false";
+                return _foo;
             }
 
             throw new NotImplementedException();

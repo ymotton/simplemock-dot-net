@@ -32,11 +32,11 @@ namespace SimpleMock.Sample
             //    .Throws(() => new InvalidOperationException("NULL AINT VALID YOU MOFO"));
             mock.HasMethod(f => f.ToInt("1"))
                 .Returns(1);
-            mock.HasMethod(f => f.FooBar("a", "b", "c"))
-                .Returns("ac");
+            //mock.HasMethod(f => f.FooBar("a", "b", "c"))
+            //    .Returns("ac");
 
             Console.WriteLine(mock.Instance);
-            mock.Instance.ToString(true);
+            Console.WriteLine(mock.Instance.ToInt("1"));
 
             Console.ReadKey();
         }
