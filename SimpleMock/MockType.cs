@@ -114,13 +114,10 @@ namespace SimpleMock
             if (methodsMocks.Any())
             {
                 EmitMethodBranch(il, methodInfo, methodsMocks);
-                il.Emit(OpCodes.Ret);
             }
-            else
-            {
-                il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
-                il.Emit(OpCodes.Throw);
-            }
+
+            il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
+            il.Emit(OpCodes.Throw);
             
             typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
         }
@@ -160,8 +157,6 @@ namespace SimpleMock
         }
         private void EmitBranch(ILGenerator il, MethodInfo methodInfo, Mock<T>.IMethodParameterMock methodParameterMock)
         {
-            var references = new List<object>();
-
             var method = (MethodCallExpression)((LambdaExpression)methodParameterMock.MethodExpression).Body;
 
             var pairs = from parameter in methodInfo.GetParameters()
@@ -169,7 +164,7 @@ namespace SimpleMock
                         select new
                                    {
                                        Parameter = parameter,
-                                       Expression = (ConstantExpression)argument
+                                       Expression = argument
                                    };
 
             var exitLabel = il.DefineLabel();
@@ -177,18 +172,40 @@ namespace SimpleMock
             int index = 1;
             foreach (var pair in pairs)
             {
-                var argumentExpression = pair.Expression;
-
-                if (argumentExpression.Type.IsClass)
+                Type argumentType;
+                object argumentValue;
+                bool isNullable = false;
+                if (pair.Expression is ConstantExpression)
                 {
-                    var defaultMethod = typeof (EqualityComparer<>).MakeGenericType(new[] {argumentExpression.Type}).GetMethod("get_Default");
-                    il.Emit(OpCodes.Call, defaultMethod);
-                    il.Emit(OpCodes.Ldarg, index);
-                    LoadConstant(references, il, argumentExpression.Value, argumentExpression.Value.GetType());
-                    var equalsMethod = defaultMethod.ReturnType.GetMethods(BindingFlags.Instance | BindingFlags.Public).First(m => m.Name == "Equals" && m.GetParameters().Count() == 2);
-                    il.Emit(OpCodes.Callvirt, equalsMethod);
-                    il.Emit(OpCodes.Brfalse_S, exitLabel);
+                    var argumentExpression = (ConstantExpression)pair.Expression;
+                    argumentType = argumentExpression.Type;
+                    argumentValue = argumentExpression.Value;
                 }
+                else if (pair.Expression is UnaryExpression)
+                {
+                    var argumentExpression = (ConstantExpression)(((UnaryExpression)pair.Expression).Operand);
+                    argumentType = typeof(Nullable<>).MakeGenericType(argumentExpression.Type);
+                    argumentValue = argumentExpression.Value;
+                    isNullable = true;
+                }
+                else
+                {
+                    throw new InvalidOperationException("Expression Not supported");
+                }
+
+                var defaultMethod = typeof(EqualityComparer<>).MakeGenericType(new[] { argumentType }).GetMethod("get_Default");
+                il.Emit(OpCodes.Call, defaultMethod);
+                il.Emit(OpCodes.Ldarg, index);
+                EmitConstant(il, argumentValue);
+                if (isNullable)
+                {
+                    var baseType = argumentType.GetGenericArguments().First();
+                    var constructor = argumentType.GetConstructor(new[] { baseType });
+                    il.Emit(OpCodes.Newobj, constructor);
+                }
+                var equalsMethod = defaultMethod.ReturnType.GetMethods(BindingFlags.Instance | BindingFlags.Public).First(m => m.Name == "Equals" && m.GetParameters().Count() == 2);
+                il.Emit(OpCodes.Callvirt, equalsMethod);
+                il.Emit(OpCodes.Brfalse_S, exitLabel);
 
                 index++;
             }
@@ -196,7 +213,7 @@ namespace SimpleMock
             if (methodParameterMock.MethodReturnsMock is Mock<T>.IMethodReturnsMock)
             {
                 object returnValue = ((Mock<T>.IMethodReturnsMock)methodParameterMock.MethodReturnsMock).ReturnValue;
-                LoadConstant(references, il, returnValue, returnValue.GetType());
+                EmitConstant(il, returnValue);
                 il.Emit(OpCodes.Ret);
             }
             else if (methodParameterMock.MethodReturnsMock is Mock<T>.IMethodThrowsMock)
@@ -207,27 +224,76 @@ namespace SimpleMock
             }
             il.MarkLabel(exitLabel);
         }
-        private void LoadConstant(List<object> references, ILGenerator il, object constantValue, Type constantType)
+        private void EmitConstant(ILGenerator il, object value)
         {
-            int index = references.IndexOf(constantValue);
-
-            if (index < 0)
+            if (value is String)
             {
-                index = references.Count;
-                references.Add(constantValue);
+                il.Emit(OpCodes.Ldstr, (string)value);
+                return;
             }
 
-            il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldc_I4_4, index);
-            il.Emit(OpCodes.Ldelem_Ref);
-            if (constantType.IsValueType)
+            if (value is bool)
             {
-                il.Emit(OpCodes.Unbox_Any, constantType);
+                if ((bool)value)
+                {
+                    il.Emit(OpCodes.Ldc_I4_1);
+                }
+                else
+                {
+                    il.Emit(OpCodes.Ldc_I4_0);
+                }
+                return;
             }
-            else
+
+            if (value is Char)
             {
-                il.Emit(OpCodes.Castclass, constantType);
+                il.Emit(OpCodes.Ldc_I4, (Char)value);
+                il.Emit(OpCodes.Conv_I2);
+                return;
+            }
+
+            if (value is byte)
+            {
+                il.Emit(OpCodes.Ldc_I4, (byte)value);
+                il.Emit(OpCodes.Conv_I1);
+            }
+            else if (value is Int16)
+            {
+                il.Emit(OpCodes.Ldc_I4, (Int16)value);
+                il.Emit(OpCodes.Conv_I2);
+            }
+            else if (value is Int32)
+            {
+                il.Emit(OpCodes.Ldc_I4, (Int32)value);
+            }
+            else if (value is Int64)
+            {
+                il.Emit(OpCodes.Ldc_I8, (Int64)value);
+            }
+            else if (value is UInt16)
+            {
+                il.Emit(OpCodes.Ldc_I4, (UInt16)value);
+                il.Emit(OpCodes.Conv_U2);
+            }
+            else if (value is UInt32)
+            {
+                il.Emit(OpCodes.Ldc_I4, (UInt32)value);
+                il.Emit(OpCodes.Conv_U4);
+            }
+            else if (value is UInt64)
+            {
+                il.Emit(OpCodes.Ldc_I8, (UInt64)value);
+                il.Emit(OpCodes.Conv_U8);
+            }
+            else if (value is Single)
+            {
+                il.Emit(OpCodes.Ldc_R4, (Single)value);
+            }
+            else if (value is Double)
+            {
+                il.Emit(OpCodes.Ldc_R8, (Double)value);
             }
         }
+
     }
 }

@@ -24,21 +24,22 @@ namespace SimpleMock.Sample
         static void Main(string[] args)
         {
             var mock = new Mock<IFoo>();
-            //mock.HasMethod(f => f.ToString(true))
-            //    .Returns("true");
-            //mock.HasMethod(f => f.ToString(false))
-            //    .Returns("false");
-            //mock.HasMethod(f => f.ToString(null))
-            //    .Throws(() => new InvalidOperationException("NULL AINT VALID YOU MOFO"));
-            mock.HasMethod(f => f.ToInt("1"))
-                .Returns(1);
-            //mock.HasMethod(f => f.FooBar("a", "b", "c"))
-            //    .Returns("ac");
+            mock.HasMethod(f => f.ToString(true))
+                .Returns("true");
+            mock.HasMethod(f => f.ToString(false))
+                .Returns("false");
+            mock.HasMethod(f => f.ToString(null))
+                .Throws(() => new InvalidOperationException("NULL AINT VALID YOU MOFO"));
 
             Console.WriteLine(mock.Instance);
-            Console.WriteLine(mock.Instance.ToInt("1"));
+            Console.WriteLine(mock.Instance.ToString(true));
 
             Console.ReadKey();
+
+            Console.WriteLine(mock.Instance.ToInt("2"));
+
+            Console.ReadKey();
+
         }
     }
 }

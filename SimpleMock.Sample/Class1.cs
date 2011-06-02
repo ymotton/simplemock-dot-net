@@ -23,15 +23,19 @@ namespace SimpleMock.Sample
             throw new NotImplementedException();
         }
 
-        public int Bar(string foo)
+        public string Bar(bool? foo)
         {
-            if (foo == "foo")
+            if (EqualityComparer<bool?>.Default.Equals(foo, true))
             {
-                return 1;
+                return "true";
             }
-            else if (foo == "bar")
+            else if (EqualityComparer<bool?>.Default.Equals(foo, false))
             {
-                return 2;
+                return "false";
+            }
+            else if (EqualityComparer<bool?>.Default.Equals(foo, null))
+            {
+                throw new Exception();
             }
             
             throw new NotImplementedException();
