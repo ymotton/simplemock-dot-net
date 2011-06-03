@@ -27,7 +27,12 @@ namespace SimpleMock.Tests
             TestType? EchoNullableStruct(TestType? parameter);
             string EchoString(string parameter);
         }
-        
+
+        private TestEnum? _testEnumField;
+        private TestEnum? TestEnumProperty { get; set; }
+        private static TestEnum? _testEnumStaticField;
+        private static TestEnum? TestEnumStaticProperty { get; set; }
+
         [TestMethod]
         public void EchoInt_WhenArgumentOne_ReturnsOne()
         {
@@ -81,7 +86,7 @@ namespace SimpleMock.Tests
         }
 
         [TestMethod]
-        public void EchoNullableEnum_WhenArgumentEnumOne_ReturnsEnumOne()
+        public void EchoNullableEnum_WhenArgumentLocalFieldOne_ReturnsEnumOne()
         {
             var mock = new Mock<ITest>();
 
@@ -91,6 +96,58 @@ namespace SimpleMock.Tests
                 .Returns(echoedValue);
 
             Assert.AreEqual(echoedValue, mock.Instance.EchoNullableEnum(echoedValue));
+        }
+
+        [TestMethod]
+        public void EchoNullableEnum_WhenArgumentPrivateInstanceFieldOne_ReturnsEnumOne()
+        {
+            var mock = new Mock<ITest>();
+
+            _testEnumField  = TestEnum.One;
+
+            mock.HasMethod(t => t.EchoNullableEnum(_testEnumField))
+                .Returns(_testEnumField);
+
+            Assert.AreEqual(_testEnumField, mock.Instance.EchoNullableEnum(_testEnumField));
+        }
+
+        [TestMethod]
+        public void EchoNullableEnum_WhenArgumentPublicInstancePropertyOne_ReturnsEnumOne()
+        {
+            var mock = new Mock<ITest>();
+
+            TestEnumProperty = TestEnum.One;
+
+            mock.HasMethod(t => t.EchoNullableEnum(TestEnumProperty))
+                .Returns(TestEnumProperty);
+
+            Assert.AreEqual(TestEnumProperty, mock.Instance.EchoNullableEnum(TestEnumProperty));
+        }
+
+        [TestMethod]
+        public void EchoNullableEnum_WhenArgumentPrivateStaticFieldOne_ReturnsEnumOne()
+        {
+            var mock = new Mock<ITest>();
+
+            _testEnumStaticField = TestEnum.One;
+
+            mock.HasMethod(t => t.EchoNullableEnum(_testEnumStaticField))
+                .Returns(_testEnumStaticField);
+
+            Assert.AreEqual(_testEnumStaticField, mock.Instance.EchoNullableEnum(_testEnumStaticField));
+        }
+
+        [TestMethod]
+        public void EchoNullableEnum_WhenArgumentPublicStaticPropertyOne_ReturnsEnumOne()
+        {
+            var mock = new Mock<ITest>();
+
+            TestEnumStaticProperty = TestEnum.One;
+
+            mock.HasMethod(t => t.EchoNullableEnum(TestEnumStaticProperty))
+                .Returns(TestEnumStaticProperty);
+
+            Assert.AreEqual(TestEnumStaticProperty, mock.Instance.EchoNullableEnum(TestEnumStaticProperty));
         }
 
         [TestMethod]
