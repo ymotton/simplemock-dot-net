@@ -50,6 +50,10 @@ namespace SimpleMock
             public Expression MethodExpression { get; private set; }
             public IMethodCompletesMock MethodReturnsMock { get; private set; }
 
+            public MethodParameterMock(Expression<Action<T>> methodExpression)
+            {
+                MethodExpression = methodExpression;
+            }
             public MethodParameterMock(Expression<Func<T, TReturn>> methodExpression)
             {
                 MethodExpression = methodExpression;
@@ -84,15 +88,18 @@ namespace SimpleMock
         public interface IMethodReturnsMock : IMethodCompletesMock
         {
             object ReturnValue { get; }
+            Type ReturnType { get; }
         }
         public class MethodReturnsMock<TReturn> : IMethodReturnsMock, IInvisibleSystemObjectMethods
         {
             public object ReturnValue { get; private set; }
+            public Type ReturnType { get; private set; }
             public Action Callback { get; private set; }
 
             public MethodReturnsMock(TReturn returnValue)
             {
                 ReturnValue = returnValue;
+                ReturnType = typeof (TReturn);
             }
 
             public void Subscribe(Action callback)
