@@ -26,6 +26,8 @@ namespace SimpleMock.Tests
             TestType EchoStruct(TestType parameter);
             TestType? EchoNullableStruct(TestType? parameter);
             string EchoString(string parameter);
+            int Add(int a, int b);
+            int Add(int a, int b, int c);
         }
 
         private TestEnum? _testEnumField;
@@ -103,7 +105,7 @@ namespace SimpleMock.Tests
         {
             var mock = new Mock<ITest>();
 
-            _testEnumField  = TestEnum.One;
+            _testEnumField = TestEnum.One;
 
             mock.HasMethod(t => t.EchoNullableEnum(_testEnumField))
                 .Returns(_testEnumField);
@@ -226,5 +228,54 @@ namespace SimpleMock.Tests
             mock.Instance.EchoString(null);
         }
 
+        [TestMethod]
+        public void EchoInt_CapturedVariableIncrementedInCallBack_CapturedVariableIncremented()
+        {
+            var mock = new Mock<ITest>();
+
+            int valueToBeIncremented = -1;
+            mock.HasMethod(t => t.EchoInt(1))
+                .Returns(1)
+                .Subscribe(() => valueToBeIncremented++);
+
+            mock.Instance.EchoInt(1); Assert.AreEqual(0, valueToBeIncremented);
+            mock.Instance.EchoInt(1); Assert.AreEqual(1, valueToBeIncremented);
+            mock.Instance.EchoInt(1); Assert.AreEqual(2, valueToBeIncremented);
+        }
+
+        [TestMethod]
+        public void EchoInt_ArgumentIncrementedInImplementation_ReturnsIncrementedValue()
+        {
+            var mock = new Mock<ITest>();
+
+            int value = -1;
+            mock.HasMethod<int, int>(
+                t => t.EchoInt(value),
+                arg1 => ++value);
+
+            Assert.AreEqual(0, mock.Instance.EchoInt(0));
+            Assert.AreEqual(1, mock.Instance.EchoInt(0));
+            Assert.AreEqual(2, mock.Instance.EchoInt(0));
+        }
+
+        [TestMethod]
+        public void Add_AddOneAndTwo_ReturnsThree()
+        {
+            var mock = new Mock<ITest>();
+            mock.HasMethod(f => f.Add(1, 2))
+                .Returns(3);
+
+            Assert.AreEqual(3, mock.Instance.Add(1, 2));
+        }
+
+        [TestMethod]
+        public void Add_AddOneAndTwoAndThree_ReturnsSix()
+        {
+            var mock = new Mock<ITest>();
+            mock.HasMethod(f => f.Add(1, 2, 3))
+                .Returns(6);
+
+            Assert.AreEqual(6, mock.Instance.Add(1, 2, 3));
+        }
     }
 }

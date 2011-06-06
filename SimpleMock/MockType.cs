@@ -12,13 +12,14 @@ namespace SimpleMock
     internal class MockType<T>
         where T : class
     {
-        private bool _cancelBuildUp;
-        private Exception _cancelBuildUpException;
+        private readonly IEnumerable<MethodMock> _methodMocks;
+        private readonly IDictionary<FieldBuilder, object> _references;
+        private TypeBuilder _typeBuilder;
 
-        private IEnumerable<Mock<T>.IMethodParameterMock> _methodParameterMocks;
-        public MockType(IEnumerable<Mock<T>.IMethodParameterMock> methodParameterMocks)
+        public MockType(IEnumerable<MethodMock> methodMocks)
         {
-            _methodParameterMocks = methodParameterMocks;
+            _methodMocks = methodMocks;
+            _references = new Dictionary<FieldBuilder, object>();
         }
 
         /// <summary>
@@ -44,20 +45,47 @@ namespace SimpleMock
                 TypeAttributes.Class | TypeAttributes.Public,
                 baseType,
                 interfaceType != null ? new[] { interfaceType } : new Type[0]);
+            
+            _typeBuilder = typeBuilder;
 
             if (interfaceType != null)
             {
                 typeBuilder.AddInterfaceImplementation(interfaceType);
             }
 
-            CreateStubImplementation(typeBuilder);
+            CreateStubImplementation();
+
+            DefineConstructor();
 
             mockType = typeBuilder.CreateType();
 
-            return (T)Activator.CreateInstance(mockType, new object[0]);
+            return (T)Activator.CreateInstance(mockType, _references.Select(r => r.Value).ToArray());
         }
 
-        private void CreateStubImplementation(TypeBuilder typeBuilder)
+        private void DefineConstructor()
+        {
+            ConstructorBuilder constructorBuilder = _typeBuilder.DefineConstructor(
+                MethodAttributes.Public,
+                CallingConventions.Standard,
+                _references.Select(r => r.Value.GetType()).ToArray());
+
+            var il = constructorBuilder.GetILGenerator();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes));
+
+            int argumentIndex = 1;
+            foreach (var reference in _references)
+            {
+                il.Emit(OpCodes.Ldarg_0);
+                il.Emit(OpCodes.Ldarg, argumentIndex);
+                il.Emit(OpCodes.Stfld, reference.Key);
+
+                argumentIndex++;
+            }
+
+            il.Emit(OpCodes.Ret);
+        }
+        private void CreateStubImplementation()
         {
             Type mockType = typeof(T);
 
@@ -78,14 +106,14 @@ namespace SimpleMock
             }
             foreach (var methodInfo in methodsToOverride)
             {
-                CreateMethodStub(typeBuilder, methodInfo);
+                CreateMethodStub(methodInfo);
             }
         }
-        private void CreateMethodStub(TypeBuilder typeBuilder, MethodInfo methodInfo)
+        private void CreateMethodStub(MethodInfo methodInfo)
         {
             var parameters = methodInfo.GetParameters().Select(pi => pi.ParameterType).ToArray();
 
-            var methodBuilder = typeBuilder.DefineMethod(
+            var methodBuilder = _typeBuilder.DefineMethod(
                                             methodInfo.Name,
                                             MethodAttributes.Public | MethodAttributes.Virtual,
                                             methodInfo.ReturnType,
@@ -93,7 +121,7 @@ namespace SimpleMock
 
             var il = methodBuilder.GetILGenerator();
 
-            var methodsMocks = _methodParameterMocks.Where(
+            var methodMocks = _methodMocks.Where(
                 m =>
                 {
                     var method = ((MethodCallExpression)((LambdaExpression)m.MethodExpression).Body).Method;
@@ -116,52 +144,49 @@ namespace SimpleMock
                     return matches;
                 });
 
-            try
+            if (methodMocks.Any())
             {
-                if (methodsMocks.Any() && !_cancelBuildUp)
+                foreach (var mock in methodMocks)
                 {
-                    EmitMocks(il, methodsMocks);
+                    EmitMock(methodInfo, il, mock);
                 }
-            }
-            catch (Exception exception)
-            {
-                _cancelBuildUpException = exception;
-                _cancelBuildUp = true;
             }
 
             il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
             il.Emit(OpCodes.Throw);
 
-            typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
+            _typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
         }
 
-        /// <summary>
-        /// Parses the expression tree and converts it to stub implementations in IL.
-        /// </summary>
-        /// <param name="il"></param>
-        /// <param name="methodInfo"></param>
-        /// <param name="methodParameterMocks"></param>
-        private static void EmitMocks(ILGenerator il, IEnumerable<Mock<T>.IMethodParameterMock> methodParameterMocks)
+        private void EmitMock(MethodInfo methodInfo, ILGenerator il, MethodMock methodMock)
         {
-            foreach (var mock in methodParameterMocks)
-            {
-                EmitMock(il, mock);
-            }
-        }
-        private static void EmitMock(ILGenerator il, Mock<T>.IMethodParameterMock methodParameterMock)
-        {
-            var lambdaExpression = methodParameterMock.MethodExpression as LambdaExpression;
+            var lambdaExpression = methodMock.MethodExpression as LambdaExpression;
             if (lambdaExpression == null)
             {
-                throw new ArgumentException("Invalid expression, expecting a lambda", "methodParameterMock");
+                throw new ArgumentException("Invalid expression, expecting a lambda", "methodMock");
             }
-            
+
             var methodExpression = lambdaExpression.Body as MethodCallExpression;
             if (methodExpression == null)
             {
-                throw new ArgumentException("Invalid expression, expecting a method call", "methodParameterMock");
+                throw new ArgumentException("Invalid expression, expecting a method call", "methodMock");
             }
-            
+
+            if (methodMock is MethodImplementationMockBase)
+            {
+                var methodImplementationMock = (MethodImplementationMockBase)methodMock;
+
+                EmitCustomImplementation(methodInfo, il, methodImplementationMock);
+            }
+            else if (methodMock is MethodParameterMockBase)
+            {
+                var methodParameterMock = (MethodParameterMockBase)methodMock;
+
+                EmitGeneratedImplementation(il, methodExpression, methodParameterMock);
+            }
+        }
+        private void EmitGeneratedImplementation(ILGenerator il, MethodCallExpression methodExpression, MethodParameterMockBase methodParameterMock)
+        {
             Label exitLabel = il.DefineLabel();
 
             int argumentIndex = 1;
@@ -172,37 +197,96 @@ namespace SimpleMock
                 argumentIndex++;
             }
 
-            if (methodParameterMock.MethodReturnsMock is Mock<T>.IMethodReturnsMock)
+            if (methodParameterMock.MethodCompletesMock is MethodReturnsMockBase)
             {
-                var methodReturnsMock = ((Mock<T>.IMethodReturnsMock)methodParameterMock.MethodReturnsMock);
+                var methodReturnsMock = ((MethodReturnsMockBase)methodParameterMock.MethodCompletesMock);
+
+                if (methodReturnsMock.Callback != null)
+                {
+                    EmitReference(il, methodReturnsMock.Callback);
+
+                    EmitInvokeAction(il, methodReturnsMock.Callback);
+                }
+
                 EmitConstant(il, methodReturnsMock.ReturnValue, methodReturnsMock.ReturnType);
+
                 il.Emit(OpCodes.Ret);
             }
-            else if (methodParameterMock.MethodReturnsMock is Mock<T>.IMethodThrowsMock)
+            else if (methodParameterMock.MethodCompletesMock is MethodThrowsMockBase)
             {
-                Type exceptionType = ((Mock<T>.IMethodThrowsMock)methodParameterMock.MethodReturnsMock).ExceptionType;
+                Type exceptionType = ((MethodThrowsMockBase)methodParameterMock.MethodCompletesMock).ExceptionType;
                 il.Emit(OpCodes.Newobj, exceptionType.GetConstructor(Type.EmptyTypes));
                 il.Emit(OpCodes.Throw);
             }
-            
-            il.MarkLabel(exitLabel);
+
+            il.MarkLabel(exitLabel);            
         }
-        private static void EmitBranch(ILGenerator il, Expression expression, Label exitLabel, int argumentIndex)
+        private void EmitCustomImplementation(MethodInfo methodInfo, ILGenerator il, MethodImplementationMockBase methodImplementationMock)
+        {
+            var implementation = methodImplementationMock.CustomImplemenation;
+            if (implementation == null)
+            {
+                return;
+            }
+
+            EmitReference(il, implementation);
+
+            EmitInvokeAction(il, implementation, methodInfo);
+
+            il.Emit(OpCodes.Ret);
+        }
+        private void EmitReference(ILGenerator il, object reference, Type referenceType = null)
+        {
+            if (referenceType == null)
+            {
+                referenceType = reference.GetType();    
+            }
+
+            var fieldBuilder = _typeBuilder.DefineField(
+                "_reference" + Guid.NewGuid().ToString().Split(new char[] { '-' })[0],
+                referenceType,
+                FieldAttributes.Private);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, fieldBuilder);
+
+            _references.Add(fieldBuilder, reference);
+        }
+        private void EmitInvokeAction(ILGenerator il, object action, MethodInfo methodInfo = null)
+        {
+            Type actionType = action.GetType();
+            Type[] parameterTypes = Type.EmptyTypes;
+            
+            if (methodInfo != null)
+            {
+                var parameters = methodInfo.GetParameters();
+                for (int parameterIndex = 0; parameterIndex < parameters.Length; parameterIndex++)
+                {
+                    il.Emit(OpCodes.Ldarg, parameterIndex + 1);
+                }
+
+                parameterTypes = parameters.Select(pi => pi.ParameterType).ToArray();
+            }
+
+            var invokeMethod = actionType.GetMethod("Invoke", parameterTypes);
+            il.Emit(OpCodes.Callvirt, invokeMethod);
+        }
+        private void EmitBranch(ILGenerator il, Expression expression, Label exitLabel, int argumentIndex)
         {
             Type argumentType;
             object argumentValue;
-            GetArgumentValueAndType(expression, out argumentValue, out argumentType);
+            ExpressionHelpers.GetArgumentValueAndType(expression, out argumentValue, out argumentType);
 
             var defaultMethod = typeof(EqualityComparer<>).MakeGenericType(new[] { argumentType }).GetMethod("get_Default");
             il.Emit(OpCodes.Call, defaultMethod);
             il.Emit(OpCodes.Ldarg, argumentIndex);
             EmitConstant(il, argumentValue, argumentType);
-        
+
             var equalsMethod = defaultMethod.ReturnType.GetMethods(BindingFlags.Instance | BindingFlags.Public).First(m => m.Name == "Equals" && m.GetParameters().Count() == 2);
             il.Emit(OpCodes.Callvirt, equalsMethod);
             il.Emit(OpCodes.Brfalse_S, exitLabel);
         }
-        private static void EmitConstant(ILGenerator il, object value, Type type)
+        private void EmitConstant(ILGenerator il, object value, Type type)
         {
             if (value == null)
             {
@@ -221,7 +305,7 @@ namespace SimpleMock
                 throw new NotSupportedException("This type is not supported!");
             }
         }
-        private static void EmitDefault(ILGenerator il, Type type)
+        private void EmitDefault(ILGenerator il, Type type)
         {
             if (type.IsValueType && type != typeof(void))
             {
@@ -242,18 +326,11 @@ namespace SimpleMock
                 il.Emit(OpCodes.Ldnull);
             }
         }
-        private static void EmitClassConstant(ILGenerator il, object value, Type type)
+        private void EmitClassConstant(ILGenerator il, object value, Type type)
         {
-            if (type == typeof(string))
-            {
-                il.Emit(OpCodes.Ldstr, (string)value);
-            }
-            else
-            {
-                throw new NotImplementedException("Other reference types are not supported");
-            }
+            EmitReference(il, value, type);
         }
-        private static void EmitValueTypeConstant(ILGenerator il, object value, Type type)
+        private void EmitValueTypeConstant(ILGenerator il, object value, Type type)
         {
             if (!type.IsValueType)
             {
@@ -276,7 +353,7 @@ namespace SimpleMock
             {
                 EmitEnum(il, value, baseType);
             }
-            else 
+            else
             {
                 // Then it must be a struct
                 EmitStruct(il, value, baseType);
@@ -288,7 +365,7 @@ namespace SimpleMock
                 il.Emit(OpCodes.Newobj, constructor);
             }
         }
-        private static void EmitPrimitive(ILGenerator il, object value, Type baseType)
+        private void EmitPrimitive(ILGenerator il, object value, Type baseType)
         {
             if (!baseType.IsPrimitive)
             {
@@ -353,7 +430,7 @@ namespace SimpleMock
                 il.Emit(OpCodes.Ldc_R8, (Double)value);
             }
         }
-        private static void EmitEnum(ILGenerator il, object value, Type baseType)
+        private void EmitEnum(ILGenerator il, object value, Type baseType)
         {
             if (!baseType.IsEnum)
             {
@@ -362,98 +439,14 @@ namespace SimpleMock
 
             il.Emit(OpCodes.Ldc_I4, (Int32)value);
         }
-        private static void EmitStruct(ILGenerator il, object value, Type baseType)
+        private void EmitStruct(ILGenerator il, object value, Type baseType)
         {
             if (baseType.IsEnum || baseType.IsPrimitive || !baseType.IsValueType)
             {
                 throw new ArgumentException("Expecting a struct", "baseType");
             }
 
-            throw new InvalidOperationException("Structs are currently unsupported");
-        }
-
-        private static void GetArgumentValueAndType(Expression expression, out object value, out Type type)
-        {
-            if (expression is ConstantExpression)
-            {
-                GetConstant(
-                    expression,
-                    out value,
-                    out type
-                );
-            }
-            else if (expression is UnaryExpression)
-            {
-                GetUnary(
-                    expression,
-                    out value,
-                    out type
-                );
-            }
-            else if (expression is MemberExpression)
-            {
-                GetMember(
-                    expression,
-                    out value,
-                    out type
-                );
-            }
-            else
-            {
-                throw new InvalidOperationException("Expression Not supported");
-            }
-
-        }
-        private static void GetConstant(Expression expression, out object value, out Type type)
-        {
-            var constantExpression = expression as ConstantExpression;
-            
-            if (constantExpression == null)
-            {
-                throw new ArgumentException("expression");
-            }
-
-            type = constantExpression.Type;
-            value = constantExpression.Value;
-        }
-        private static void GetUnary(Expression expression, out object value, out Type type)
-        {
-            var unaryExpression = expression as UnaryExpression;
-
-            if (unaryExpression == null)
-            {
-                throw new ArgumentException("expression");
-            }
-
-            var constantExpression = unaryExpression.Operand as ConstantExpression;
-
-            if (constantExpression == null)
-            {
-                throw new NotSupportedException(
-                    string.Format(
-                        "This type of Operand is not supported for UnaryExpressions ({0})",
-                        unaryExpression.Operand.GetType())
-                );
-            }
-
-            type = typeof(Nullable<>).MakeGenericType(constantExpression.Type);
-            value = constantExpression.Value;
-        }
-        private static void GetMember(Expression expression, out object value, out Type type)
-        {
-            var memberExpression = expression as MemberExpression;
-
-            if (memberExpression == null)
-            {
-                throw new ArgumentException("expression");
-            }
-
-            var objectMember = Expression.Convert(memberExpression, typeof(object));
-            var getterLambda = Expression.Lambda<Func<object>>(objectMember);
-            var getter = getterLambda.Compile();
-
-            value = getter();
-            type = memberExpression.Type;
+            EmitReference(il, value, baseType);
         }
     }
 }
