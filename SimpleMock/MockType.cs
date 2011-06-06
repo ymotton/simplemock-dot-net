@@ -16,6 +16,10 @@ namespace SimpleMock
         private readonly IDictionary<FieldBuilder, object> _references;
         private TypeBuilder _typeBuilder;
 
+        /// <summary>
+        /// Creates an instance of a MockType given a set of method mock definitions.
+        /// </summary>
+        /// <param name="methodMocks">Definitions of a method mock.</param>
         public MockType(IEnumerable<MethodMock> methodMocks)
         {
             _methodMocks = methodMocks;
@@ -53,7 +57,7 @@ namespace SimpleMock
                 typeBuilder.AddInterfaceImplementation(interfaceType);
             }
 
-            CreateStubImplementation();
+            CreateMethodStubs();
 
             DefineConstructor();
 
@@ -62,17 +66,23 @@ namespace SimpleMock
             return (T)Activator.CreateInstance(mockType, _references.Select(r => r.Value).ToArray());
         }
 
+        /// <summary>
+        /// Creates a constructor that takes all the references as parameters and assigns them to private fields.
+        /// </summary>
         private void DefineConstructor()
         {
+            // Create a constructor that takes all the references as parameters
             ConstructorBuilder constructorBuilder = _typeBuilder.DefineConstructor(
                 MethodAttributes.Public,
                 CallingConventions.Standard,
                 _references.Select(r => r.Value.GetType()).ToArray());
 
+            // Call object's parameterless constructor
             var il = constructorBuilder.GetILGenerator();
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Call, typeof(object).GetConstructor(Type.EmptyTypes));
 
+            // Load all of the arguments into fields for the references
             int argumentIndex = 1;
             foreach (var reference in _references)
             {
@@ -85,7 +95,12 @@ namespace SimpleMock
 
             il.Emit(OpCodes.Ret);
         }
-        private void CreateStubImplementation()
+        
+        /// <summary>
+        /// Creates stub implementations for all the non implemented abstract methods / properties in the base class or interface.
+        /// The methods / properties that have been defined are implemented accordingly.
+        /// </summary>
+        private void CreateMethodStubs()
         {
             Type mockType = typeof(T);
 
@@ -109,6 +124,11 @@ namespace SimpleMock
                 CreateMethodStub(methodInfo);
             }
         }
+
+        /// <summary>
+        /// Creates a stub implementation for the method if it's abstract. Otherwise it creates the defined behavior.
+        /// </summary>
+        /// <param name="methodInfo"></param>
         private void CreateMethodStub(MethodInfo methodInfo)
         {
             var parameters = methodInfo.GetParameters().Select(pi => pi.ParameterType).ToArray();
