@@ -10,6 +10,7 @@ Method Mocking
 	// Define a mock implementation for the Add(int, int) method to return 3 in case arguments 1 and 2 are provided.
 	mock.HasMethod(foo => foo.Add(1, 2))
 	    .Returns(3);
+
     // Define a mock implementation for the ToString(int) method to return "1" in case argument 1 is provided.
 	mock.HasMethod(foo => foo.ToString(1))
 	    .Returns("1");
