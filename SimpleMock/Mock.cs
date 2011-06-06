@@ -1,10 +1,12 @@
 ﻿using System;
-using System.Linq;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 
 namespace SimpleMock
 {
+    #region Fluent API Nested Type Baseclasses
+
     public abstract class MethodMock
     {
         protected MethodMock(Expression expresison)
@@ -49,6 +51,8 @@ namespace SimpleMock
         internal Func<Exception> ExceptionInitializer { get; set; }
         internal Action Callback { get; set; }
     }
+
+    #endregion
 
     /// <summary>
     /// A class that helps define and generate a mock implementation of a class or an interface.
@@ -205,6 +209,8 @@ namespace SimpleMock
             return methodImplementationMock;
         }
 
+        #region Fluent API Nested Types
+        
         public class MethodParameterMock<TReturn> : MethodParameterMockBase, IInvisibleSystemObjectMethods
         {
             internal MethodParameterMock(Expression<Func<T, TReturn>> methodExpression)
@@ -324,5 +330,7 @@ namespace SimpleMock
                 ExceptionInitializer = () => exceptionInitializer();
             }
         }
+
+        #endregion
     }
 }
