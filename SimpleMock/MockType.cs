@@ -49,7 +49,7 @@ namespace SimpleMock
                 TypeAttributes.Class | TypeAttributes.Public,
                 baseType,
                 interfaceType != null ? new[] { interfaceType } : new Type[0]);
-            
+
             _typeBuilder = typeBuilder;
 
             if (interfaceType != null)
@@ -95,7 +95,7 @@ namespace SimpleMock
 
             il.Emit(OpCodes.Ret);
         }
-        
+
         /// <summary>
         /// Creates stub implementations for all the non implemented abstract methods / properties in the base class or interface.
         /// The methods / properties that have been defined are implemented accordingly.
@@ -164,12 +164,9 @@ namespace SimpleMock
                     return matches;
                 });
 
-            if (methodMocks.Any())
+            foreach (var mock in methodMocks)
             {
-                foreach (var mock in methodMocks)
-                {
-                    EmitMock(methodInfo, il, mock);
-                }
+                EmitMock(methodInfo, il, mock);
             }
 
             il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
@@ -234,14 +231,15 @@ namespace SimpleMock
             }
             else if (methodParameterMock.MethodCompletesMock is MethodThrowsMockBase)
             {
-                var methodThrowsMock = (MethodThrowsMockBase) methodParameterMock.MethodCompletesMock;
+                var methodThrowsMock = (MethodThrowsMockBase)methodParameterMock.MethodCompletesMock;
 
                 if (methodThrowsMock.ExceptionInitializer != null)
                 {
                     var exceptionInitializer = methodThrowsMock.ExceptionInitializer;
-                    
+
                     EmitReference(il, exceptionInitializer);
-                    il.Emit(OpCodes.Callvirt, exceptionInitializer.GetType().GetMethod("Invoke"));
+                    
+                    EmitInvokeAction(il, exceptionInitializer);
                 }
                 else
                 {
@@ -252,7 +250,7 @@ namespace SimpleMock
                 il.Emit(OpCodes.Throw);
             }
 
-            il.MarkLabel(exitLabel);            
+            il.MarkLabel(exitLabel);
         }
         private void EmitCustomImplementation(MethodInfo methodInfo, ILGenerator il, MethodImplementationMockBase methodImplementationMock)
         {
@@ -272,7 +270,7 @@ namespace SimpleMock
         {
             if (referenceType == null)
             {
-                referenceType = reference.GetType();    
+                referenceType = reference.GetType();
             }
 
             var fieldBuilder = _typeBuilder.DefineField(
@@ -289,7 +287,7 @@ namespace SimpleMock
         {
             Type actionType = action.GetType();
             Type[] parameterTypes = Type.EmptyTypes;
-            
+
             if (methodInfo != null)
             {
                 var parameters = methodInfo.GetParameters();
@@ -321,21 +319,25 @@ namespace SimpleMock
         }
         private void EmitConstant(ILGenerator il, object value, Type type)
         {
+            // If the value is null, just emit the type's default value
             if (value == null)
             {
                 EmitDefault(il, type);
             }
-            else if (type.IsClass)
+            // If it's a nullable valuetype initialize it accordingly
+            else if (type.IsValueType && Nullable.GetUnderlyingType(type) != null)
             {
-                EmitClassConstant(il, value, type);
+                Type baseType = type.GetGenericArguments().First();
+
+                EmitReference(il, value, baseType);
+
+                var constructor = type.GetConstructor(new[] {baseType});
+                il.Emit(OpCodes.Newobj, constructor);
             }
-            else if (type.IsValueType)
-            {
-                EmitValueTypeConstant(il, value, type);
-            }
+            // If it's a non-nullable valuetype or a reference type, just emit the reference
             else
             {
-                throw new NotSupportedException("This type is not supported!");
+                EmitReference(il, value, type);
             }
         }
         private void EmitDefault(ILGenerator il, Type type)
@@ -358,128 +360,6 @@ namespace SimpleMock
             {
                 il.Emit(OpCodes.Ldnull);
             }
-        }
-        private void EmitClassConstant(ILGenerator il, object value, Type type)
-        {
-            EmitReference(il, value, type);
-        }
-        private void EmitValueTypeConstant(ILGenerator il, object value, Type type)
-        {
-            if (!type.IsValueType)
-            {
-                throw new ArgumentException("Expecting a ValueType", "type");
-            }
-
-            Type baseType = type;
-            bool isNullable = false;
-            if (Nullable.GetUnderlyingType(type) != null)
-            {
-                baseType = type.GetGenericArguments().First();
-                isNullable = true;
-            }
-
-            if (baseType.IsPrimitive)
-            {
-                EmitPrimitive(il, value, baseType);
-            }
-            else if (baseType.IsEnum)
-            {
-                EmitEnum(il, value, baseType);
-            }
-            else
-            {
-                // Then it must be a struct
-                EmitStruct(il, value, baseType);
-            }
-
-            if (isNullable)
-            {
-                var constructor = type.GetConstructor(new[] { baseType });
-                il.Emit(OpCodes.Newobj, constructor);
-            }
-        }
-        private void EmitPrimitive(ILGenerator il, object value, Type baseType)
-        {
-            if (!baseType.IsPrimitive)
-            {
-                throw new ArgumentException("Expecting a primitive", "baseType");
-            }
-
-            if (baseType == typeof(bool))
-            {
-                if ((bool)value)
-                {
-                    il.Emit(OpCodes.Ldc_I4_1);
-                }
-                else
-                {
-                    il.Emit(OpCodes.Ldc_I4_0);
-                }
-            }
-            else if (baseType == typeof(Char))
-            {
-                il.Emit(OpCodes.Ldc_I4, (Char)value);
-                il.Emit(OpCodes.Conv_I2);
-            }
-            else if (baseType == typeof(byte))
-            {
-                il.Emit(OpCodes.Ldc_I4, (byte)value);
-                il.Emit(OpCodes.Conv_I1);
-            }
-            else if (baseType == typeof(Int16))
-            {
-                il.Emit(OpCodes.Ldc_I4, (Int16)value);
-                il.Emit(OpCodes.Conv_I2);
-            }
-            else if (baseType == typeof(Int32))
-            {
-                il.Emit(OpCodes.Ldc_I4, (Int32)value);
-            }
-            else if (baseType == typeof(Int64))
-            {
-                il.Emit(OpCodes.Ldc_I8, (Int64)value);
-            }
-            else if (baseType == typeof(UInt16))
-            {
-                il.Emit(OpCodes.Ldc_I4, (UInt16)value);
-                il.Emit(OpCodes.Conv_U2);
-            }
-            else if (baseType == typeof(UInt32))
-            {
-                il.Emit(OpCodes.Ldc_I4, (UInt32)value);
-                il.Emit(OpCodes.Conv_U4);
-            }
-            else if (baseType == typeof(UInt64))
-            {
-                il.Emit(OpCodes.Ldc_I8, (UInt64)value);
-                il.Emit(OpCodes.Conv_U8);
-            }
-            else if (baseType == typeof(Single))
-            {
-                il.Emit(OpCodes.Ldc_R4, (Single)value);
-            }
-            else if (baseType == typeof(Double))
-            {
-                il.Emit(OpCodes.Ldc_R8, (Double)value);
-            }
-        }
-        private void EmitEnum(ILGenerator il, object value, Type baseType)
-        {
-            if (!baseType.IsEnum)
-            {
-                throw new ArgumentException("Expecting an enum", "baseType");
-            }
-
-            il.Emit(OpCodes.Ldc_I4, (Int32)value);
-        }
-        private void EmitStruct(ILGenerator il, object value, Type baseType)
-        {
-            if (baseType.IsEnum || baseType.IsPrimitive || !baseType.IsValueType)
-            {
-                throw new ArgumentException("Expecting a struct", "baseType");
-            }
-
-            EmitReference(il, value, baseType);
         }
     }
 }
