@@ -19,6 +19,8 @@ namespace SimpleMock.Tests
 
         public interface ITest
         {
+            int ThrowsException();
+            DateTime ReturnsDateTime();
             int EchoInt(int parameter);
             int? EchoNullableInt(int? parameter);
             TestEnum EchoEnum(TestEnum parameter);
@@ -294,6 +296,28 @@ namespace SimpleMock.Tests
                 .Returns(6);
 
             Assert.AreEqual(6, mock.Instance.Add(1, 2, 3));
+        }
+
+        [TestMethod, ExpectedException(typeof(InvalidOperationException))]
+        public void HasMethod_ThatTakesNoParameters_AndThrowsException()
+        {
+            var mock = new Mock<ITest>();
+            mock.HasMethod(f => f.ThrowsException())
+                .Throws(() => new InvalidOperationException());
+
+            mock.Instance.ThrowsException();
+        }
+
+        [TestMethod]
+        public void HasMethod_ThatTakesNoParameters_AndReturnsDateTime()
+        {
+            var mock = new Mock<ITest>();
+
+            var expectedDate = DateTime.Parse("01/01/1980 00:00:01");
+            mock.HasMethod(f => f.ReturnsDateTime())
+                .Returns(expectedDate);
+
+            Assert.AreEqual(expectedDate, mock.Instance.ReturnsDateTime());
         }
     }
 }

@@ -72,7 +72,7 @@ namespace SimpleMock
             {
                 if (EqualityComparer<T>.Default.Equals(_instance, default(T)))
                 {
-                    _instance = new MockType<T>(MethodMocks.Select(p => p.Value)).BuildUp();
+                    _instance = new MockType<T>(MethodMocks).BuildUp();
                 }
 
                 return _instance;
@@ -80,19 +80,19 @@ namespace SimpleMock
         }
         private T _instance;
 
-        protected IDictionary<int, MethodMock> MethodMocks
+        protected IList<MethodMock> MethodMocks
         {
             get
             {
                 if (_methodMocks == null)
                 {
-                    _methodMocks = new Dictionary<int, MethodMock>();
+                    _methodMocks = new List<MethodMock>();
                 }
                 
                 return _methodMocks;
             }
         }
-        private IDictionary<int, MethodMock> _methodMocks;
+        private IList<MethodMock> _methodMocks;
 
         #endregion
 
@@ -105,7 +105,7 @@ namespace SimpleMock
         public MethodParameterMock<TReturn> HasMethod<TReturn>(Expression<Func<T, TReturn>> methodExpression)
         {
             var methodParameterMock = new MethodParameterMock<TReturn>(methodExpression);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodParameterMock);
+            AddAndReturnMethodMock(methodExpression, methodParameterMock);
             return methodParameterMock;
         }
 
@@ -119,9 +119,7 @@ namespace SimpleMock
         /// <returns></returns>
         public MethodImplementationMock<TReturn> HasMethod<TReturn>(Expression<Func<T, TReturn>> methodExpression, Func<TReturn> implementation)
         {
-            var methodImplementationMock = new MethodImplementationMock<TReturn>(methodExpression, implementation);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodImplementationMock);
-            return methodImplementationMock;
+            return AddAndReturnMethodMock(methodExpression, new MethodImplementationMock<TReturn>(methodExpression, implementation));
         }
         /// <summary>
         /// Defines a mock implementation for given method with given argument.
@@ -134,9 +132,7 @@ namespace SimpleMock
         /// <returns></returns>
         public MethodImplementationMock<TArg1, TReturn> HasMethod<TArg1, TReturn>(Expression<Func<T, TReturn>> methodExpression, Func<TArg1, TReturn> implementation)
         {
-            var methodImplementationMock = new MethodImplementationMock<TArg1, TReturn>(methodExpression, implementation);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodImplementationMock);
-            return methodImplementationMock;
+            return AddAndReturnMethodMock(methodExpression, new MethodImplementationMock<TArg1, TReturn>(methodExpression, implementation));
         }
         /// <summary>
         /// Defines a mock implementation for given method with given argument.
@@ -150,9 +146,7 @@ namespace SimpleMock
         /// <returns></returns>
         public MethodImplementationMock<TArg1, TArg2, TReturn> HasMethod<TArg1, TArg2, TReturn>(Expression<Func<T, TReturn>> methodExpression, Func<TArg1, TArg2, TReturn> implementation)
         {
-            var methodImplementationMock = new MethodImplementationMock<TArg1, TArg2, TReturn>(methodExpression, implementation);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodImplementationMock);
-            return methodImplementationMock;
+            return AddAndReturnMethodMock(methodExpression, new MethodImplementationMock<TArg1, TArg2, TReturn>(methodExpression, implementation));
         }
         /// <summary>
         /// Defines a mock implementation for given method with given argument.
@@ -167,9 +161,7 @@ namespace SimpleMock
         /// <returns></returns>
         public MethodImplementationMock<TArg1, TArg2, TArg3, TReturn> HasMethod<TArg1, TArg2, TArg3, TReturn>(Expression<Func<T, TReturn>> methodExpression, Func<TArg1, TArg2, TArg3, TReturn> implementation)
         {
-            var methodImplementationMock = new MethodImplementationMock<TArg1, TArg2, TArg3, TReturn>(methodExpression, implementation);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodImplementationMock);
-            return methodImplementationMock;
+            return AddAndReturnMethodMock(methodExpression, new MethodImplementationMock<TArg1, TArg2, TArg3, TReturn>(methodExpression, implementation));
         }
         /// <summary>
         /// Defines a mock implementation for given method with given argument.
@@ -185,9 +177,7 @@ namespace SimpleMock
         /// <returns></returns>
         public MethodImplementationMock<TArg1, TArg2, TArg3, TArg4, TReturn> HasMethod<TArg1, TArg2, TArg3, TArg4, TReturn>(Expression<Func<T, TReturn>> methodExpression, Func<TArg1, TArg2, TArg3, TArg4, TReturn> implementation)
         {
-            var methodImplementationMock = new MethodImplementationMock<TArg1, TArg2, TArg3, TArg4, TReturn>(methodExpression, implementation);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodImplementationMock);
-            return methodImplementationMock;
+            return AddAndReturnMethodMock(methodExpression, new MethodImplementationMock<TArg1, TArg2, TArg3, TArg4, TReturn>(methodExpression, implementation));
         }
         /// <summary>
         /// Defines a mock implementation for given method with given argument.
@@ -204,9 +194,15 @@ namespace SimpleMock
         /// <returns></returns>
         public MethodImplementationMock<TArg1, TArg2, TArg3, TArg4, TArg5, TReturn> HasMethod<TArg1, TArg2, TArg3, TArg4, TArg5, TReturn>(Expression<Func<T, TReturn>> methodExpression, Func<TArg1, TArg2, TArg3, TArg4, TArg5, TReturn> implementation)
         {
-            var methodImplementationMock = new MethodImplementationMock<TArg1, TArg2, TArg3, TArg4, TArg5, TReturn>(methodExpression, implementation);
-            MethodMocks.Add(methodExpression.GetHashCode(), methodImplementationMock);
-            return methodImplementationMock;
+            return AddAndReturnMethodMock(methodExpression, new MethodImplementationMock<TArg1, TArg2, TArg3, TArg4, TArg5, TReturn>(methodExpression, implementation));
+        }
+
+        private TMethodMock AddAndReturnMethodMock<TMethodMock>(Expression expression, TMethodMock methodMock)
+            where TMethodMock: MethodMock
+        {
+            MethodMocks.Add(methodMock);
+
+            return methodMock;
         }
 
         #region Fluent API Nested Types
