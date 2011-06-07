@@ -319,5 +319,6 @@ namespace SimpleMock.Tests
 
             Assert.AreEqual(expectedDate, mock.Instance.ReturnsDateTime());
         }
+
     }
 }

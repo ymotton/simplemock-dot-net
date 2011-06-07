@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.ComponentModel;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Linq.Expressions;
-using System.Security;
 
 namespace SimpleMock
 {
@@ -57,9 +55,9 @@ namespace SimpleMock
                 typeBuilder.AddInterfaceImplementation(interfaceType);
             }
 
-            CreateMethodStubs();
+            EmitMethodStubs();
 
-            DefineConstructor();
+            EmitConstructor();
 
             mockType = typeBuilder.CreateType();
 
@@ -69,7 +67,7 @@ namespace SimpleMock
         /// <summary>
         /// Creates a constructor that takes all the references as parameters and assigns them to private fields.
         /// </summary>
-        private void DefineConstructor()
+        private void EmitConstructor()
         {
             // Create a constructor that takes all the references as parameters
             ConstructorBuilder constructorBuilder = _typeBuilder.DefineConstructor(
@@ -100,7 +98,7 @@ namespace SimpleMock
         /// Creates stub implementations for all the non implemented abstract methods / properties in the base class or interface.
         /// The methods / properties that have been defined are implemented accordingly.
         /// </summary>
-        private void CreateMethodStubs()
+        private void EmitMethodStubs()
         {
             Type mockType = typeof(T);
 
@@ -121,7 +119,7 @@ namespace SimpleMock
             }
             foreach (var methodInfo in methodsToOverride)
             {
-                CreateMethodStub(methodInfo);
+                EmitMethodStub(methodInfo);
             }
         }
 
@@ -129,7 +127,7 @@ namespace SimpleMock
         /// Creates a stub implementation for the method if it's abstract. Otherwise it creates the defined behavior.
         /// </summary>
         /// <param name="methodInfo"></param>
-        private void CreateMethodStub(MethodInfo methodInfo)
+        private void EmitMethodStub(MethodInfo methodInfo)
         {
             var parameters = methodInfo.GetParameters().Select(pi => pi.ParameterType).ToArray();
 
@@ -266,42 +264,6 @@ namespace SimpleMock
 
             il.Emit(OpCodes.Ret);
         }
-        private void EmitReference(ILGenerator il, object reference, Type referenceType = null)
-        {
-            if (referenceType == null)
-            {
-                referenceType = reference.GetType();
-            }
-
-            var fieldBuilder = _typeBuilder.DefineField(
-                "_reference" + Guid.NewGuid().ToString().Split(new char[] { '-' })[0],
-                referenceType,
-                FieldAttributes.Private);
-
-            il.Emit(OpCodes.Ldarg_0);
-            il.Emit(OpCodes.Ldfld, fieldBuilder);
-
-            _references.Add(fieldBuilder, reference);
-        }
-        private void EmitInvokeAction(ILGenerator il, object action, MethodInfo methodInfo = null)
-        {
-            Type actionType = action.GetType();
-            Type[] parameterTypes = Type.EmptyTypes;
-
-            if (methodInfo != null)
-            {
-                var parameters = methodInfo.GetParameters();
-                for (int parameterIndex = 0; parameterIndex < parameters.Length; parameterIndex++)
-                {
-                    il.Emit(OpCodes.Ldarg, parameterIndex + 1);
-                }
-
-                parameterTypes = parameters.Select(pi => pi.ParameterType).ToArray();
-            }
-
-            var invokeMethod = actionType.GetMethod("Invoke", parameterTypes);
-            il.Emit(OpCodes.Callvirt, invokeMethod);
-        }
         private void EmitBranch(ILGenerator il, Expression expression, Label exitLabel, int argumentIndex)
         {
             Type argumentType;
@@ -360,6 +322,42 @@ namespace SimpleMock
             {
                 il.Emit(OpCodes.Ldnull);
             }
+        }
+        private void EmitReference(ILGenerator il, object reference, Type referenceType = null)
+        {
+            if (referenceType == null)
+            {
+                referenceType = reference.GetType();
+            }
+
+            var fieldBuilder = _typeBuilder.DefineField(
+                "_reference" + Guid.NewGuid().ToString().Split(new char[] { '-' })[0],
+                referenceType,
+                FieldAttributes.Private);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, fieldBuilder);
+
+            _references.Add(fieldBuilder, reference);
+        }
+        private void EmitInvokeAction(ILGenerator il, object action, MethodInfo methodInfo = null)
+        {
+            Type actionType = action.GetType();
+            Type[] parameterTypes = Type.EmptyTypes;
+
+            if (methodInfo != null)
+            {
+                var parameters = methodInfo.GetParameters();
+                for (int parameterIndex = 0; parameterIndex < parameters.Length; parameterIndex++)
+                {
+                    il.Emit(OpCodes.Ldarg, parameterIndex + 1);
+                }
+
+                parameterTypes = parameters.Select(pi => pi.ParameterType).ToArray();
+            }
+
+            var invokeMethod = actionType.GetMethod("Invoke", parameterTypes);
+            il.Emit(OpCodes.Callvirt, invokeMethod);
         }
     }
 }
