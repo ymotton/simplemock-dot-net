@@ -229,6 +229,24 @@ namespace SimpleMock.Tests
         }
 
         [TestMethod]
+        public void EchoString_WhenArgumentNull_ThrowsExceptionReturnedFromDelegate()
+        {
+            var mock = new Mock<ITest>();
+
+            mock.HasMethod(t => t.EchoString(null))
+                .Throws(() => new ArgumentNullException("parameter"));
+
+            try
+            {
+                mock.Instance.EchoString(null);
+            }
+            catch (ArgumentNullException e)
+            {
+                Assert.AreEqual("parameter", e.ParamName);
+            }
+        }
+        
+        [TestMethod]
         public void EchoInt_CapturedVariableIncrementedInCallBack_CapturedVariableIncremented()
         {
             var mock = new Mock<ITest>();

@@ -219,7 +219,7 @@ namespace SimpleMock
 
             if (methodParameterMock.MethodCompletesMock is MethodReturnsMockBase)
             {
-                var methodReturnsMock = ((MethodReturnsMockBase)methodParameterMock.MethodCompletesMock);
+                var methodReturnsMock = (MethodReturnsMockBase)methodParameterMock.MethodCompletesMock;
 
                 if (methodReturnsMock.Callback != null)
                 {
@@ -234,8 +234,21 @@ namespace SimpleMock
             }
             else if (methodParameterMock.MethodCompletesMock is MethodThrowsMockBase)
             {
-                Type exceptionType = ((MethodThrowsMockBase)methodParameterMock.MethodCompletesMock).ExceptionType;
-                il.Emit(OpCodes.Newobj, exceptionType.GetConstructor(Type.EmptyTypes));
+                var methodThrowsMock = (MethodThrowsMockBase) methodParameterMock.MethodCompletesMock;
+
+                if (methodThrowsMock.ExceptionInitializer != null)
+                {
+                    var exceptionInitializer = methodThrowsMock.ExceptionInitializer;
+                    
+                    EmitReference(il, exceptionInitializer);
+                    il.Emit(OpCodes.Callvirt, exceptionInitializer.GetType().GetMethod("Invoke"));
+                }
+                else
+                {
+                    Type exceptionType = methodThrowsMock.ExceptionType;
+                    il.Emit(OpCodes.Newobj, exceptionType.GetConstructor(Type.EmptyTypes));
+                }
+
                 il.Emit(OpCodes.Throw);
             }
 
