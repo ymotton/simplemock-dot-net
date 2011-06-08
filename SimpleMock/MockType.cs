@@ -42,24 +42,22 @@ namespace SimpleMock
 
             string randomString = Guid.NewGuid().ToString().Split(new char[] { '-' })[0];
 
-            var typeBuilder = moduleBuilder.DefineType(
+            _typeBuilder = moduleBuilder.DefineType(
                 baseType.Name + randomString,
                 TypeAttributes.Class | TypeAttributes.Public,
                 baseType,
                 interfaceType != null ? new[] { interfaceType } : new Type[0]);
 
-            _typeBuilder = typeBuilder;
-
             if (interfaceType != null)
             {
-                typeBuilder.AddInterfaceImplementation(interfaceType);
+                _typeBuilder.AddInterfaceImplementation(interfaceType);
             }
 
             EmitMethodStubs();
 
             EmitConstructor();
 
-            mockType = typeBuilder.CreateType();
+            mockType = _typeBuilder.CreateType();
 
             return (T)Activator.CreateInstance(mockType, _references.Select(r => r.Value).ToArray());
         }
@@ -102,22 +100,13 @@ namespace SimpleMock
         {
             Type mockType = typeof(T);
 
-            var propertiesToImplement =
-                    mockType.IsInterface
-                    ? mockType.GetProperties(BindingFlags.Public | BindingFlags.Instance).ToList()
-                    : new List<PropertyInfo>();
-
-            var methodsToOverride =
-                    mockType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                            .Where(mi => mi.IsAbstract || mi.IsVirtual)
-                            .ToList();
-
-            foreach (var propertyInfo in propertiesToImplement)
+            foreach (var propertyInfo in mockType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
                 // TODO: Implement CreatePropertyStub(...)
                 Console.WriteLine(propertyInfo);
             }
-            foreach (var methodInfo in methodsToOverride)
+            foreach (var methodInfo in mockType.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                                               .Where(mi => mi.IsAbstract || mi.IsVirtual))
             {
                 EmitMethodStub(methodInfo);
             }
@@ -130,7 +119,7 @@ namespace SimpleMock
         private void EmitMethodStub(MethodInfo methodInfo)
         {
             var parameters = methodInfo.GetParameters().Select(pi => pi.ParameterType).ToArray();
-
+            
             var methodBuilder = _typeBuilder.DefineMethod(
                                             methodInfo.Name,
                                             MethodAttributes.Public | MethodAttributes.Virtual,
@@ -139,32 +128,24 @@ namespace SimpleMock
 
             var il = methodBuilder.GetILGenerator();
 
-            var methodMocks = _methodMocks.Where(
-                m =>
-                {
-                    var method = ((MethodCallExpression)((LambdaExpression)m.MethodExpression).Body).Method;
+            var methodMocks = from methodMock in _methodMocks
+                              let expression = (MethodCallExpression) ((LambdaExpression) methodMock.MethodExpression).Body
+                              let method = expression.Method
+                              where method.ReturnType == methodInfo.ReturnType
+                              where method.Name == methodInfo.Name
+                              where method.GetParameters().Zip(parameters, (l, r) => l.ParameterType == r).All(x => x)
+                              select new {expression, methodMock};
 
-                    bool matches = method.ReturnType == methodInfo.ReturnType;
-                    matches &= method.Name == methodInfo.Name;
-
-                    var leftEnumerator = method.GetParameters().GetEnumerator();
-                    var rightEnumerator = methodInfo.GetParameters().GetEnumerator();
-
-                    bool leftNext = leftEnumerator.MoveNext();
-                    bool rightNext = rightEnumerator.MoveNext();
-                    while (leftNext && rightNext)
-                    {
-                        matches &= ((ParameterInfo)leftEnumerator.Current).ParameterType == ((ParameterInfo)rightEnumerator.Current).ParameterType;
-                        leftNext = leftEnumerator.MoveNext();
-                        rightNext = rightEnumerator.MoveNext();
-                    }
-
-                    return matches;
-                });
-
-            foreach (var mock in methodMocks)
+            foreach (var methodMock in methodMocks)
             {
-                EmitMock(methodInfo, il, mock);
+                if (methodMock.methodMock is MethodImplementationMockBase)
+                {
+                    EmitCustomImplementation(methodInfo, il, (MethodImplementationMockBase)methodMock.methodMock);
+                }
+                else if (methodMock.methodMock is MethodParameterMockBase)
+                {
+                    EmitGeneratedImplementation(il, methodMock.expression, (MethodParameterMockBase)methodMock.methodMock);
+                }
             }
 
             il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
@@ -173,33 +154,6 @@ namespace SimpleMock
             _typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
         }
 
-        private void EmitMock(MethodInfo methodInfo, ILGenerator il, MethodMock methodMock)
-        {
-            var lambdaExpression = methodMock.MethodExpression as LambdaExpression;
-            if (lambdaExpression == null)
-            {
-                throw new ArgumentException("Invalid expression, expecting a lambda", "methodMock");
-            }
-
-            var methodExpression = lambdaExpression.Body as MethodCallExpression;
-            if (methodExpression == null)
-            {
-                throw new ArgumentException("Invalid expression, expecting a method call", "methodMock");
-            }
-
-            if (methodMock is MethodImplementationMockBase)
-            {
-                var methodImplementationMock = (MethodImplementationMockBase)methodMock;
-
-                EmitCustomImplementation(methodInfo, il, methodImplementationMock);
-            }
-            else if (methodMock is MethodParameterMockBase)
-            {
-                var methodParameterMock = (MethodParameterMockBase)methodMock;
-
-                EmitGeneratedImplementation(il, methodExpression, methodParameterMock);
-            }
-        }
         private void EmitGeneratedImplementation(ILGenerator il, MethodCallExpression methodExpression, MethodParameterMockBase methodParameterMock)
         {
             Label exitLabel = il.DefineLabel();
