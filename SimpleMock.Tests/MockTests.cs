@@ -367,5 +367,28 @@ namespace SimpleMock.Tests
             Assert.AreEqual("1", mock.Instance.Foo(1));
             Assert.AreEqual("1", mock.Instance.Foo("1"));
         }
+
+        [TestMethod, ExpectedException(typeof(ArgumentException))]
+        public void GenericMethod_TakesGenericType_ThrowsException()
+        {
+            var mock = new Mock<IFoo<int>>();
+
+            mock.HasMethod(foo => foo.Foo(1))
+                .Throws<ArgumentException>();
+
+            Assert.AreEqual("1", mock.Instance.Foo(1));
+        }
+
+        [TestMethod, ExpectedException(typeof(ArgumentNullException))]
+        public void GenericMethod_TakesGenericType_ThrowsExceptionReturnedFromDelegate()
+        {
+            var mock = new Mock<IFoo<int>>();
+
+            string stringValue = null;
+            mock.HasMethod(foo => foo.Foo(stringValue))
+                .Throws(() => new ArgumentNullException());
+
+            Assert.AreEqual("1", mock.Instance.Foo(stringValue));
+        }
     }
 }
