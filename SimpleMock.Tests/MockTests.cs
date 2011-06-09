@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Linq;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using System.Collections.Generic;
 
 namespace SimpleMock.Tests
 {
@@ -32,10 +34,16 @@ namespace SimpleMock.Tests
             int Add(int a, int b, int c);
         }
 
-        public interface IFoo<in T>
+        public interface IFoo<T>
         {
             string ToString(T value);
             string Foo<U>(U value);
+            U Echo<U>(U value);
+            T ConvertToT<U>(U value);
+            T EnumerateU<U>(IEnumerable<U> value);
+            U EnumerateT<U>(IEnumerable<T> value);
+            IEnumerable<U> CreateEnumerableU<U>(U argument1, U argument2);
+            IEnumerable<U> CreateEnumerableParams<U>(params U[] arguments);
         }
 
         private TestEnum? _testEnumField;
@@ -389,6 +397,71 @@ namespace SimpleMock.Tests
                 .Throws(() => new ArgumentNullException());
 
             Assert.AreEqual("1", mock.Instance.Foo(stringValue));
+        }
+
+        [TestMethod]
+        public void GenericMethod_TakesGenericType_ReturnsGenericType()
+        {
+            var mock = new Mock<IFoo<int>>();
+
+            mock.HasMethod(foo => foo.Echo(1))
+                .Returns(1);
+
+            Assert.AreEqual(1, mock.Instance.Echo(1));
+        }
+
+        [TestMethod]
+        public void GenericMethod_TakesGenericType_ReturnsGenericTypeFromDeclaringType()
+        {
+            var mock = new Mock<IFoo<string>>();
+
+            mock.HasMethod(foo => foo.ConvertToT(1))
+                .Returns("1");
+
+            Assert.AreEqual("1", mock.Instance.ConvertToT(1));
+        }
+
+        [TestMethod]
+        public void GenericMethod_TakesGenericTypes_ReturnsIEnumerableOfGenericType()
+        {
+            var mock = new Mock<IFoo<string>>();
+
+            mock.HasMethod(foo => foo.CreateEnumerableU(1, 2))
+                .Returns(new List<int>{1, 2});
+
+            List<int> enumeration = mock.Instance.CreateEnumerableU(1, 2).ToList();
+            Assert.AreEqual(2, enumeration.Count);
+            Assert.AreEqual(1, enumeration[0]);
+            Assert.AreEqual(2, enumeration[1]);
+        }
+
+        [TestMethod]
+        public void GenericMethod_TakesParamsOfGenericTypes_ReturnsIEnumerableOfGenericType()
+        {
+            var mock = new Mock<IFoo<string>>();
+
+            var parameters = new[] {1, 2, 3, 4};
+            mock.HasMethod(foo => foo.CreateEnumerableParams(parameters))
+                .Returns(new List<int> { 1, 2, 3, 4 });
+
+            List<int> enumeration = mock.Instance.CreateEnumerableParams(parameters).ToList();
+            Assert.AreEqual(4, enumeration.Count);
+            Assert.AreEqual(1, enumeration[0]);
+            Assert.AreEqual(2, enumeration[1]);
+            Assert.AreEqual(3, enumeration[2]);
+            Assert.AreEqual(4, enumeration[3]);
+        }
+
+        [TestMethod]
+        public void GenericMethod_TakesEnumerationOfGenericTypes_ReturnsGenericTypeFromDeclaringType()
+        {
+            var mock = new Mock<IFoo<string>>();
+
+            var enumeration = new List<int> {1, 2};
+            mock.HasMethod(foo => foo.EnumerateU(enumeration))
+                .Returns("test");
+
+            Assert.AreEqual("test", mock.Instance.EnumerateU(enumeration));
         }
     }
 }

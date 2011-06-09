@@ -4,6 +4,7 @@ using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Collections;
 
 namespace SimpleMock
 {
@@ -384,21 +385,26 @@ namespace SimpleMock
         }
         private Type ConstructGenericParameter(ParameterInfo parameterInfo, IDictionary<Type, Type> typeMapper)
         {
-            Type genericType;
-
-            Type parameterType = parameterInfo.ParameterType;
-            if (parameterType.IsGenericType)
+            return ConstructGenericType(parameterInfo.ParameterType, typeMapper);
+        }
+        private Type ConstructGenericType(Type type, IDictionary<Type, Type> typeMapper)
+        {
+            if (type.IsArray)
             {
-                var genericTypes = parameterType.GetGenericArguments().Select(t => typeMapper[t]).ToArray();
-
-                genericType = parameterType.MakeGenericType(genericTypes);
+                // TODO: Figure out a better way to construct the type of an array of a given type
+                return new ArrayList().ToArray(ConstructGenericType(type.GetElementType(), typeMapper)).GetType();
             }
-            else
+            else if (type.IsGenericParameter)
             {
-                genericType = typeMapper[parameterType];
+                return typeMapper[type];
+            }
+            else if (type.IsGenericTypeDefinition)
+            {
+                var genericTypes = type.GetGenericArguments().Select(t => typeMapper[t]).ToArray();
+                return type.MakeGenericType(genericTypes);
             }
 
-            return genericType;
+            return type;
         }
     }
 }

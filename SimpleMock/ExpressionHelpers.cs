@@ -33,9 +33,12 @@ namespace SimpleMock
             }
             else
             {
-                throw new InvalidOperationException("Expression Not supported");
+                GetDefault(
+                    expression,
+                    out value,
+                    out type
+                );
             }
-
         }
         private static void GetConstant(Expression expression, out object value, out Type type)
         {
@@ -87,6 +90,11 @@ namespace SimpleMock
 
             value = getter();
             type = memberExpression.Type;
+        }
+        private static void GetDefault(Expression expression, out object value, out Type type)
+        {
+            value = Expression.Lambda(expression).Compile().DynamicInvoke();
+            type = value.GetType();
         }
     }
 }
