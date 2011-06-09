@@ -32,6 +32,7 @@ namespace SimpleMock
         public T BuildUp()
         {
             Type mockType = typeof(T);
+
             Type baseType = mockType.IsClass ? mockType : typeof(object);
             Type interfaceType = mockType.IsInterface ? mockType : null;
 
@@ -118,120 +119,182 @@ namespace SimpleMock
         /// <param name="methodInfo"></param>
         private void EmitMethodStub(MethodInfo methodInfo)
         {
-            var parameters = methodInfo.GetParameters().Select(pi => pi.ParameterType).ToArray();
-            
             var methodBuilder = _typeBuilder.DefineMethod(
                                             methodInfo.Name,
                                             MethodAttributes.Public | MethodAttributes.Virtual,
                                             methodInfo.ReturnType,
-                                            parameters);
+                                            methodInfo.GetParameters().Select(pi => pi.ParameterType).ToArray());
 
             var il = methodBuilder.GetILGenerator();
 
-            var methodMocks = from methodMock in _methodMocks
-                              let expression = (MethodCallExpression) ((LambdaExpression) methodMock.MethodExpression).Body
-                              let method = expression.Method
-                              where method.ReturnType == methodInfo.ReturnType
-                              where method.Name == methodInfo.Name
-                              where method.GetParameters().Zip(parameters, (l, r) => l.ParameterType == r).All(x => x)
-                              select new {expression, methodMock};
-
-            foreach (var methodMock in methodMocks)
+            if (methodInfo.IsGenericMethodDefinition)
             {
-                if (methodMock.methodMock is MethodImplementationMockBase)
+                methodBuilder.DefineGenericParameters(methodInfo.GetGenericArguments().Select(p => p.Name).ToArray());
+
+                // Match method mocks to the method we're implementing
+                // And group on method signature, so generic method instances can be separated
+                var methodMockGroups = from methodMock in _methodMocks
+                                       let expressionMethod = methodMock.Expression.Method
+                                       where expressionMethod.IsGenericMethod
+                                       where methodInfo.Equals(expressionMethod.GetGenericMethodDefinition())
+                                       group methodMock by expressionMethod into g
+                                       select g;
+
+                // Iterate through the groups of methods in case multiple generic method instances have been defined
+                foreach (var methodMockGroup in methodMockGroups)
                 {
-                    EmitCustomImplementation(methodInfo, il, (MethodImplementationMockBase)methodMock.methodMock);
-                }
-                else if (methodMock.methodMock is MethodParameterMockBase)
-                {
-                    EmitGeneratedImplementation(il, methodMock.expression, (MethodParameterMockBase)methodMock.methodMock);
+                    var exitLabel = il.DefineLabel();
+
+                    var groupMethod = methodMockGroup.First().Expression.Method;
+                    var groupMethodDefinition = groupMethod.GetGenericMethodDefinition();
+
+                    foreach (var argument in groupMethodDefinition.GetGenericArguments().Zip(groupMethod.GetGenericArguments(), (l, r) => new { l, r }))
+                    {
+                        EmitTypeOf(il, argument.l);
+                        EmitTypeOf(il, argument.r);
+
+                        il.Emit(OpCodes.Call, typeof(Type).GetMethod("op_Equality", new[] { typeof(Type), typeof(Type) }));
+                        il.Emit(OpCodes.Brfalse_S, exitLabel);
+                    }
+
+                    EmitMethodMocks(il, methodMockGroup);
+
+                    il.MarkLabel(exitLabel);
                 }
             }
+            else
+            {
+                // Match method mocks to the method we're implementing
+                var methodMocks = _methodMocks.Where(m => methodInfo.Equals(m.Expression.Method));
 
+                EmitMethodMocks(il, methodMocks);
+            }
+
+            // By default throw a NotImplementedException
             il.Emit(OpCodes.Newobj, typeof(NotImplementedException).GetConstructor(Type.EmptyTypes));
             il.Emit(OpCodes.Throw);
 
             _typeBuilder.DefineMethodOverride(methodBuilder, methodInfo);
         }
+        private void EmitMethodMocks(ILGenerator il, IEnumerable<MethodMock> methodMocks)
+        {
+            // Emit either a custom implementation or a generated implementation based on the defined mock
+            foreach (var mock in methodMocks)
+            {
+                if (mock is MethodImplementationMockBase)
+                {
+                    EmitCustomImplementation(mock.Expression.Method, il, (MethodImplementationMockBase)mock);
+                }
+                else if (mock is MethodParameterMockBase)
+                {
+                    EmitGeneratedImplementation(mock.Expression.Method, il, (MethodParameterMockBase)mock);
+                }
+            }
+        }
 
-        private void EmitGeneratedImplementation(ILGenerator il, MethodCallExpression methodExpression, MethodParameterMockBase methodParameterMock)
+        private void EmitGeneratedImplementation(MethodInfo methodInfo, ILGenerator il, MethodParameterMockBase methodParameterMock)
         {
             Label exitLabel = il.DefineLabel();
 
-            int argumentIndex = 1;
-            foreach (var expression in methodExpression.Arguments)
-            {
-                EmitBranch(il, expression, exitLabel, argumentIndex);
-
-                argumentIndex++;
-            }
+            EmitBranches(methodInfo, il, methodParameterMock.Expression, exitLabel);
 
             if (methodParameterMock.MethodCompletesMock is MethodReturnsMockBase)
             {
                 var methodReturnsMock = (MethodReturnsMockBase)methodParameterMock.MethodCompletesMock;
 
-                if (methodReturnsMock.Callback != null)
-                {
-                    EmitReference(il, methodReturnsMock.Callback);
-
-                    EmitInvokeAction(il, methodReturnsMock.Callback);
-                }
-
-                EmitConstant(il, methodReturnsMock.ReturnValue, methodReturnsMock.ReturnType);
-
-                il.Emit(OpCodes.Ret);
+                EmitReturnsImplementation(il, methodReturnsMock);
             }
             else if (methodParameterMock.MethodCompletesMock is MethodThrowsMockBase)
             {
                 var methodThrowsMock = (MethodThrowsMockBase)methodParameterMock.MethodCompletesMock;
 
-                if (methodThrowsMock.ExceptionInitializer != null)
-                {
-                    var exceptionInitializer = methodThrowsMock.ExceptionInitializer;
-
-                    EmitReference(il, exceptionInitializer);
-                    
-                    EmitInvokeAction(il, exceptionInitializer);
-                }
-                else
-                {
-                    Type exceptionType = methodThrowsMock.ExceptionType;
-                    il.Emit(OpCodes.Newobj, exceptionType.GetConstructor(Type.EmptyTypes));
-                }
-
-                il.Emit(OpCodes.Throw);
+                EmitThrowsImplementation(il, methodThrowsMock);
             }
 
             il.MarkLabel(exitLabel);
         }
+        private void EmitReturnsImplementation(ILGenerator il, MethodReturnsMockBase methodReturnsMock)
+        {
+            if (methodReturnsMock.Callback != null)
+            {
+                EmitReference(il, methodReturnsMock.Callback);
+                EmitInvokeAction(il, methodReturnsMock.Callback);
+            }
+            
+            EmitConstant(il, methodReturnsMock.ReturnValue, methodReturnsMock.ReturnType);
+            il.Emit(OpCodes.Ret);
+        }
+        private void EmitThrowsImplementation(ILGenerator il, MethodThrowsMockBase methodThrowsMock)
+        {
+            if (methodThrowsMock.ExceptionInitializer != null)
+            {
+                EmitReference(il, methodThrowsMock.ExceptionInitializer);
+                EmitInvokeAction(il, methodThrowsMock.ExceptionInitializer);
+            }
+            else
+            {
+                Type exceptionType = methodThrowsMock.ExceptionType;
+                il.Emit(OpCodes.Newobj, exceptionType.GetConstructor(Type.EmptyTypes));
+            }
+
+            il.Emit(OpCodes.Throw);
+        }
         private void EmitCustomImplementation(MethodInfo methodInfo, ILGenerator il, MethodImplementationMockBase methodImplementationMock)
         {
-            var implementation = methodImplementationMock.CustomImplemenation;
-            if (implementation == null)
+            if (methodImplementationMock.CustomImplemenation == null)
             {
                 return;
             }
 
-            EmitReference(il, implementation);
-
-            EmitInvokeAction(il, implementation, methodInfo);
+            EmitReference(il, methodImplementationMock.CustomImplemenation);
+            EmitInvokeAction(il, methodImplementationMock.CustomImplemenation, methodInfo);
 
             il.Emit(OpCodes.Ret);
         }
-        private void EmitBranch(ILGenerator il, Expression expression, Label exitLabel, int argumentIndex)
+        private void EmitBranches(MethodInfo methodInfo, ILGenerator il, MethodCallExpression methodExpression, Label exitLabel)
         {
-            Type argumentType;
-            object argumentValue;
-            ExpressionHelpers.GetArgumentValueAndType(expression, out argumentValue, out argumentType);
+            int argumentIndex = 1;
+            foreach (var argumentExpression in methodExpression.Arguments)
+            {
+                Type argumentType;
+                object argumentValue;
+                ExpressionHelpers.GetArgumentValueAndType(argumentExpression, out argumentValue, out argumentType);
 
-            var defaultMethod = typeof(EqualityComparer<>).MakeGenericType(new[] { argumentType }).GetMethod("get_Default");
-            il.Emit(OpCodes.Call, defaultMethod);
-            il.Emit(OpCodes.Ldarg, argumentIndex);
-            EmitConstant(il, argumentValue, argumentType);
+                var defaultMethod = typeof(EqualityComparer<>).MakeGenericType(new[] { argumentType }).GetMethod("get_Default");
+                il.Emit(OpCodes.Call, defaultMethod);
 
-            var equalsMethod = defaultMethod.ReturnType.GetMethods(BindingFlags.Instance | BindingFlags.Public).First(m => m.Name == "Equals" && m.GetParameters().Count() == 2);
-            il.Emit(OpCodes.Callvirt, equalsMethod);
-            il.Emit(OpCodes.Brfalse_S, exitLabel);
+                EmitLdArgument(methodInfo, il, argumentIndex);
+                EmitConstant(il, argumentValue, argumentType);
+
+                var equalsMethod = defaultMethod.ReturnType.GetMethods(BindingFlags.Instance | BindingFlags.Public).First(m => m.Name == "Equals" && m.GetParameters().Count() == 2);
+                il.Emit(OpCodes.Callvirt, equalsMethod);
+
+                il.Emit(OpCodes.Brfalse_S, exitLabel);
+
+                argumentIndex++;
+            } 
+        }
+        private void EmitLdArgument(MethodInfo methodInfo, ILGenerator il, int argumentIndex)
+        {
+            if (methodInfo.IsGenericMethod)
+            {
+                var methodDefinitionInfo = methodInfo.GetGenericMethodDefinition();
+                var typeMapper = methodDefinitionInfo.GetGenericArguments()
+                                     .Zip(methodInfo.GetGenericArguments(), (l, r) => new { l, r })
+                                     .ToDictionary(x => x.l, x => x.r);
+
+                var genericParameters = methodDefinitionInfo.GetParameters();
+
+                il.Emit(OpCodes.Ldarg, argumentIndex);
+
+                ParameterInfo parameterInfo = genericParameters[argumentIndex - 1];
+                il.Emit(OpCodes.Box, parameterInfo.ParameterType);
+                il.Emit(OpCodes.Unbox_Any, ConstructGenericParameter(parameterInfo, typeMapper));
+            }
+            else
+            {
+                il.Emit(OpCodes.Ldarg, argumentIndex);
+            }
         }
         private void EmitConstant(ILGenerator il, object value, Type type)
         {
@@ -247,7 +310,7 @@ namespace SimpleMock
 
                 EmitReference(il, value, baseType);
 
-                var constructor = type.GetConstructor(new[] {baseType});
+                var constructor = type.GetConstructor(new[] { baseType });
                 il.Emit(OpCodes.Newobj, constructor);
             }
             // If it's a non-nullable valuetype or a reference type, just emit the reference
@@ -302,9 +365,10 @@ namespace SimpleMock
             if (methodInfo != null)
             {
                 var parameters = methodInfo.GetParameters();
-                for (int parameterIndex = 0; parameterIndex < parameters.Length; parameterIndex++)
+                
+                for (int parameterIndex = 1; parameterIndex <= parameters.Length; parameterIndex++)
                 {
-                    il.Emit(OpCodes.Ldarg, parameterIndex + 1);
+                    EmitLdArgument(methodInfo, il, parameterIndex);
                 }
 
                 parameterTypes = parameters.Select(pi => pi.ParameterType).ToArray();
@@ -312,6 +376,29 @@ namespace SimpleMock
 
             var invokeMethod = actionType.GetMethod("Invoke", parameterTypes);
             il.Emit(OpCodes.Callvirt, invokeMethod);
+        }
+        private void EmitTypeOf(ILGenerator il, Type type)
+        {
+            il.Emit(OpCodes.Ldtoken, type);
+            il.Emit(OpCodes.Call, typeof(Type).GetMethod("GetTypeFromHandle"));
+        }
+        private Type ConstructGenericParameter(ParameterInfo parameterInfo, IDictionary<Type, Type> typeMapper)
+        {
+            Type genericType;
+
+            Type parameterType = parameterInfo.ParameterType;
+            if (parameterType.IsGenericType)
+            {
+                var genericTypes = parameterType.GetGenericArguments().Select(t => typeMapper[t]).ToArray();
+
+                genericType = parameterType.MakeGenericType(genericTypes);
+            }
+            else
+            {
+                genericType = typeMapper[parameterType];
+            }
+
+            return genericType;
         }
     }
 }

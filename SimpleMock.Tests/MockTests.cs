@@ -32,6 +32,12 @@ namespace SimpleMock.Tests
             int Add(int a, int b, int c);
         }
 
+        public interface IFoo<in T>
+        {
+            string ToString(T value);
+            string Foo<U>(U value);
+        }
+
         private TestEnum? _testEnumField;
         private TestEnum? TestEnumProperty { get; set; }
         private static TestEnum? _testEnumStaticField;
@@ -320,5 +326,46 @@ namespace SimpleMock.Tests
             Assert.AreEqual(expectedDate, mock.Instance.ReturnsDateTime());
         }
 
+        [TestMethod]
+        public void GenericInterface_TakesGenericType_ReturnsString()
+        {
+            var mock = new Mock<IFoo<int>>();
+
+            mock.HasMethod(
+                foo => foo.ToString(1),
+                (int i) => i.ToString());
+
+            Assert.AreEqual("1", mock.Instance.ToString(1));
+        }
+        
+        [TestMethod]
+        public void GenericMethod_TakesGenericTypeInImplementation_ReturnsString()
+        {
+            var mock = new Mock<IFoo<int>>();
+
+            mock.HasMethod(
+                foo => foo.Foo(1),
+                (int i) => i.ToString());
+            mock.HasMethod(
+                foo => foo.Foo("test"),
+                (string i) => i);
+
+            Assert.AreEqual("1", mock.Instance.Foo(1));
+            Assert.AreEqual("test", mock.Instance.Foo("test"));
+        }
+
+        [TestMethod]
+        public void GenericMethod_TakesGenericType_ReturnsString()
+        {
+            var mock = new Mock<IFoo<int>>();
+
+            mock.HasMethod(foo => foo.Foo(1))
+                .Returns("1");
+            mock.HasMethod(foo => foo.Foo("1"))
+                .Returns("1");
+
+            Assert.AreEqual("1", mock.Instance.Foo(1));
+            Assert.AreEqual("1", mock.Instance.Foo("1"));
+        }
     }
 }

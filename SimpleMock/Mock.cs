@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Linq.Expressions;
 
 namespace SimpleMock
@@ -9,12 +8,24 @@ namespace SimpleMock
 
     public abstract class MethodMock
     {
-        protected MethodMock(Expression expresison)
+        protected MethodMock(Expression expression)
         {
-            MethodExpression = expresison;
+            var lambdaExpression = expression as LambdaExpression;
+            if (lambdaExpression == null)
+            {
+                throw new ArgumentException("Expecting a lambda expression", "expression");
+            }
+
+            var methodCallExpression = lambdaExpression.Body as MethodCallExpression;
+            if (methodCallExpression == null)
+            {
+                throw new ArgumentException("Expecting a method call expression", "expression");
+            }
+
+            Expression = methodCallExpression;
         }
 
-        internal Expression MethodExpression { get; set; }
+        internal MethodCallExpression Expression { get; set; }
     }
     public abstract class MethodImplementationMockBase : MethodMock
     {
